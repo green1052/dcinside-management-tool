@@ -5,21 +5,10 @@ import * as cheerio from "cheerio";
 import config from "./config.json" with {type: "json"};
 import {Article} from "./article.js";
 import EventEmitter from "events";
-
-interface SerializedField {
-    name: string;
-    value: string;
-}
-
-function serialize(fields: SerializedField[]) {
-    const result: Record<string, string> = {};
-
-    for (const field of fields) {
-        result[field.name] = field.value;
-    }
-
-    return result;
-}
+import {serialize} from "./util/serialize.js";
+import {baseUrl} from "./util/baseUrl.js";
+import {GalleryType} from "./@types/GalleryType.js";
+import {deleteArticles} from "./util/deleteArticle.js";
 
 async function login() {
     const response = await client.get("https://sign.dcinside.com/login?s_url=https://www.dcinside.com/");
@@ -36,29 +25,42 @@ async function login() {
 
 const newPostEmitter = new EventEmitter();
 
-const cookieJar = new CookieJar(new FileCookieStore("./cookies.json"));
+export const cookieJar = new CookieJar(new FileCookieStore("./cookies.json"));
 
-const client = got.extend({
+export const client = got.extend({
     headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
     },
-    cookieJar: cookieJar
+    cookieJar: cookieJar,
+    http2: true
 });
 
 //await login();
 
-
 let $prev: cheerio.CheerioAPI | undefined = undefined;
+let first = true;
+
+const regexList: { [key: string]: RegExp[] } = {
+    title: []
+};
+
+for (const regex of config.regex.title as string[]) {
+    regexList.title.push(new RegExp(regex, "i"));
+}
 
 setInterval(async () => {
-    const response = await client.get("https://gall.dcinside.com/mgallery/board/lists/?id=projectmx");
+    const response = await client.get(`${baseUrl(config.galleryType as GalleryType)}/lists/?id=${config.galleryId}`);
     const $ = cheerio.load(response.body);
+
+    console.log(response.body.includes("개념글 해제"));
 
     const $oldList = $prev ? $prev(".gall_list:not([id]) tbody") : undefined;
     const $newList = $(".gall_list:not([id]) tbody");
 
-    if (!$prev) {
-        $prev = $;
+    $prev = $;
+
+    if (first) {
+        first = false;
         return;
     }
 
@@ -87,5 +89,31 @@ setInterval(async () => {
         newPosts.push(new Article($element));
     }
 
+    if (newPosts.length === 0) return;
+
     newPostEmitter.emit("newPost", newPosts);
 }, 5000);
+
+
+// 정규식 삭제
+newPostEmitter.on("newPost", async (articles: Article[]) => {
+    const target = [];
+    for (const regExp of regexList.title) {
+        target.push(...articles.filter(article => regExp.test(article.title)));
+    }
+
+    await deleteArticles(target);
+});
+
+// 도배 감지
+newPostEmitter.on("newPost", async (articles: Article[]) => {
+    if (config.spamAlert && articles.length >= config.spamAlertCount) {
+        console.log("게시글 도배 감지");
+    }
+});
+
+// 유동 민주화
+newPostEmitter.on("newPost", async (articles: Article[]) => {
+    if (!config.logoutUserDemocratization) return;
+    await deleteArticles(articles.filter(article => article.isLogout));
+});
