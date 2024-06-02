@@ -1,0 +1,15 @@
+{
+    "userid": "",
+    "password": "",
+    "galleryType": "",
+    "galleryId": "",
+    "spamAlert": true,
+    "spamAlertCount": 10,
+    "logoutUserDemocratization": false,
+    "regex": {
+        "title": [
+            "^테스트",
+            "내\\w*주\\w*딱\\w*내\\w*놔"
+        ]
+    }
+}
